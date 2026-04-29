@@ -197,20 +197,19 @@ def df_to_word(df: pd.DataFrame, title: str, filename: str) -> bytes:
 
     doc.add_paragraph()
 
-    # Parse filename: {ABBR}{LEVEL}_{SESSION}+{SEMESTER}_{COURSE}_{DATE}.csv
+    # Parse filename: SCHOOLABBRLEVEL_COURSECODE_DATE.csv
     try:
         base   = filename.replace(".csv", "")
         parts  = base.split("_")
         ident  = parts[0]
-        course = parts[2] if len(parts) > 2 else "—"
-        date   = parts[3] if len(parts) > 3 else "—"
-        sem_id = parts[1] if len(parts) > 1 else "—"
+        course = parts[1] if len(parts) > 1 else "—"
+        date   = parts[2] if len(parts) > 2 else "—"
     except Exception:
-        ident = course = date = sem_id = "—"
+        ident = course = date = "—"
 
     pt = doc.add_paragraph()
     pt.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    rt = pt.add_run(f"{course}  |  {ident}  |  {sem_id}  |  {date}")
+    rt = pt.add_run(f"{course}  |  {ident}  |  {date}")
     rt.bold = True
     rt.font.size = Pt(12)
 
@@ -258,61 +257,29 @@ def df_to_word(df: pd.DataFrame, title: str, filename: str) -> bytes:
     return buf.getvalue()
 
 
-# ── Browse — Session → Semester → Date → File ─────────────────────────────────
-ROOT = "attendances"
+# ── Browse ─────────────────────────────────────────────────────────────────────
+ROOT  = "attendances"
+dates = list_dirs(ROOT)
 
-# ── Step 1: Session ────────────────────────────────────────────────────────────
-sessions = list_dirs(ROOT)
-
-if not sessions:
+if not dates:
     st.info("No attendance records have been pushed to LAVA yet.")
     st.caption("Records appear automatically when course reps end attendance sessions in ULAS.")
     st.stop()
 
-st.markdown("### 📅 Browse Records")
-c1, c2, c3 = st.columns(3)
-
-with c1:
-    selected_session = st.selectbox(
-        "Academic Session",
-        sessions,
-        help="e.g. 2025-2026",
-    )
-
-# ── Step 2: Semester ───────────────────────────────────────────────────────────
-with c2:
-    semesters = list_dirs(f"{ROOT}/{selected_session}")
-    if not semesters:
-        st.warning(f"No semester folders found under {selected_session}.")
-        st.stop()
-    selected_semester = st.selectbox(
-        "Semester",
-        semesters,
-        format_func=lambda s: s.replace("Semester", " Semester").strip(),
-    )
-
-sem_path = f"{ROOT}/{selected_session}/{selected_semester}"
-
-# ── Step 3: Date ───────────────────────────────────────────────────────────────
-with c3:
-    dates = list_dirs(sem_path)
-    if not dates:
-        st.warning(f"No date folders found under {selected_session} / {selected_semester}.")
-        st.stop()
-    selected_date = st.selectbox("Date", dates)
-
-date_path = f"{sem_path}/{selected_date}"
+st.markdown("### 📅 Select Date")
+selected_date = st.selectbox("Date", dates)
 
 with st.spinner(f"Loading records for {selected_date}..."):
-    all_files = list_csvs(date_path)
+    all_files = list_csvs(f"{ROOT}/{selected_date}")
 
 if not all_files:
     st.warning(f"No attendance records found for {selected_date}.")
     st.stop()
 
 # ── Search ─────────────────────────────────────────────────────────────────────
+st.markdown("### 🔍 Filter")
 search = st.text_input(
-    "🔍 Search by course code, abbreviation, school, or level",
+    "Search by course code, abbreviation, school, or level",
     placeholder="e.g. CSC301  or  EEE300  or  SEET",
 )
 
@@ -326,49 +293,34 @@ if not filtered:
 
 # ── Stats ──────────────────────────────────────────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
-s1, s2, s3 = st.columns(3)
-courses_set = set()
-for f in filtered:
-    # Format: {ABBR}{LEVEL}_{SESSION}+{SEMESTER}_{COURSE}_{DATE}.csv
-    parts = f["name"].replace(".csv", "").split("_")
-    if len(parts) >= 3:
-        courses_set.add(parts[2])
-
-sem_label = selected_semester.replace("Semester", " Semester").strip()
-
+s1, s2 = st.columns(2)
 with s1:
     st.markdown(
         f'<div class="stat-box"><div class="num">{len(filtered)}</div>'
-        f'<div class="lbl">Records</div></div>',
+        f'<div class="lbl">Records for {selected_date}</div></div>',
         unsafe_allow_html=True,
     )
 with s2:
+    courses = set()
+    for f in filtered:
+        parts = f["name"].replace(".csv", "").split("_")
+        if len(parts) >= 2:
+            courses.add(parts[1])
     st.markdown(
-        f'<div class="stat-box"><div class="num">{len(courses_set)}</div>'
+        f'<div class="stat-box"><div class="num">{len(courses)}</div>'
         f'<div class="lbl">Courses</div></div>',
-        unsafe_allow_html=True,
-    )
-with s3:
-    st.markdown(
-        f'<div class="stat-box" style="font-size:0.85rem">'
-        f'<div class="num" style="font-size:1.1rem;padding:0.4rem 0">{selected_session}</div>'
-        f'<div class="lbl">{sem_label}</div></div>',
         unsafe_allow_html=True,
     )
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ── File picker ────────────────────────────────────────────────────────────────
-# Filename: {ABBR}{LEVEL}_{SESSION}+{SEMESTER}_{COURSE}_{DATE}.csv
-# parts[0]=ABBRLEVEL  parts[1]=SESSION+SEMESTER  parts[2]=COURSE  parts[3]=DATE
+# Filename: SCHOOLABBRLEVEL_COURSECODE_DATE.csv
 def make_label(name: str) -> str:
     try:
         base  = name.replace(".csv", "")
         parts = base.split("_")
-        ident  = parts[0]
-        course = parts[2] if len(parts) > 2 else "?"
-        date   = parts[3] if len(parts) > 3 else selected_date
-        return f"{course}  ·  {ident}  ·  {date}"
+        return f"{parts[2]}  ·  {parts[1]}  ·  {parts[0]}"
     except Exception:
         return name
 
@@ -383,15 +335,13 @@ try:
     base   = filename.replace(".csv", "")
     parts  = base.split("_")
     ident  = parts[0]
-    course = parts[2] if len(parts) > 2 else "—"
-    date   = parts[3] if len(parts) > 3 else selected_date
+    course = parts[1] if len(parts) > 1 else "—"
+    date   = parts[2] if len(parts) > 2 else "—"
 except Exception:
     ident = course = date = "—"
 
 st.markdown(f"""<div class="info-card">
     <b>Reference:</b> {ident} &nbsp;|&nbsp;
-    <b>Session:</b> {selected_session} &nbsp;|&nbsp;
-    <b>Semester:</b> {sem_label} &nbsp;|&nbsp;
     <b>Course:</b> {course} &nbsp;|&nbsp;
     <b>Date:</b> {date}
 </div>""", unsafe_allow_html=True)
@@ -406,7 +356,7 @@ except Exception as e:
     st.error(f"Could not read CSV: {e}")
     st.stop()
 
-doc_title = f"Attendance — {course} | {ident} | {selected_session} {sem_label} | {date}"
+doc_title = f"Attendance — {course} | {ident} | {date}"
 base_name = filename.replace(".csv", "")
 
 st.markdown(f"### {course} — {ident} &nbsp;&nbsp; ({len(df)} students)")
